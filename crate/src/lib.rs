@@ -537,10 +537,9 @@ impl Universe {
             return;
         }
 
-        self.update_sheep_bodies(id, core_x, core_y);
-
         if move_cooldown > 1 {
             self.sheep.get_mut(&id).unwrap().move_cooldown -= 1;
+            self.update_sheep_bodies(id, core_x, core_y);
             return;
         }
 
@@ -552,29 +551,69 @@ impl Universe {
         if dx != 0 {
             direction = dx as i8;
         }
-        let new_x = core_x + dx;
-        let new_y = core_y + dy;
-        let destination = self.checked_cell(new_x, new_y);
-        let can_enter = destination
-            .map(|cell| {
-                cell.species == Species::Empty
-                    || (cell.species == Species::Sheep
-                        && cell.ra == id
-                        && cell.rb & SHEEP_ROLE_MASK == SHEEP_BODY)
-            })
-            .unwrap_or(false);
+
+        let can_enter = |cell: Cell| {
+            cell.species == Species::Empty
+                || (cell.species == Species::Sheep
+                    && cell.ra == id
+                    && cell.rb & SHEEP_ROLE_MASK == SHEEP_BODY)
+        };
+        let mut movement = self
+            .checked_cell(core_x + dx, core_y + dy)
+            .filter(|cell| can_enter(*cell))
+            .map(|cell| (core_x + dx, core_y + dy, cell));
+
+        if movement.is_none() && plant_direction.is_some() {
+            let fallback_offsets = match (dx, dy) {
+                (step_x, 0) if step_x != 0 => [(step_x, -1), (step_x, 1), (0, -1), (0, 1)],
+                (0, step_y) if step_y != 0 => [(-1, step_y), (1, step_y), (-1, 0), (1, 0)],
+                (step_x, step_y) if step_x != 0 && step_y != 0 => [
+                    (step_x, 0),
+                    (0, step_y),
+                    (step_x, -step_y),
+                    (-step_x, step_y),
+                ],
+                _ => [(0, 0), (0, 0), (0, 0), (0, 0)],
+            };
+
+            movement = fallback_offsets
+                .iter()
+                .copied()
+                .find_map(|(offset_x, offset_y)| {
+                    let candidate_x = core_x + offset_x;
+                    let candidate_y = core_y + offset_y;
+                    self.checked_cell(candidate_x, candidate_y)
+                        .filter(|cell| can_enter(*cell))
+                        .map(|cell| (candidate_x, candidate_y, cell))
+                });
+        }
+
         let next_cooldown = 8 + self.rng.gen_range(0..5) as u8;
 
-        if !can_enter {
+        let (new_x, new_y, destination) = match movement {
+            Some(movement) => movement,
+            None => {
+                let state = self.sheep.get_mut(&id).unwrap();
+                state.direction = -direction;
+                state.move_cooldown = next_cooldown;
+                self.update_sheep_bodies(id, core_x, core_y);
+                return;
+            }
+        };
+
+        if new_x != core_x {
+            direction = (new_x - core_x) as i8;
+        }
+
+        if !can_enter(destination) {
             let state = self.sheep.get_mut(&id).unwrap();
             state.direction = -direction;
             state.move_cooldown = next_cooldown;
+            self.update_sheep_bodies(id, core_x, core_y);
             return;
         }
 
-        let destination_is_body = destination
-            .map(|cell| cell.species == Species::Sheep && cell.ra == id)
-            .unwrap_or(false);
+        let destination_is_body = destination.species == Species::Sheep && destination.ra == id;
         let replacement_body = if destination_is_body {
             Some((new_x, new_y))
         } else {
@@ -613,6 +652,7 @@ impl Universe {
         state.core_y = new_y;
         state.direction = direction;
         state.move_cooldown = next_cooldown;
+        self.update_sheep_bodies(id, new_x, new_y);
     }
 
     fn update_sheep_bodies(&mut self, id: u8, core_x: i32, core_y: i32) {
@@ -725,6 +765,9 @@ impl Universe {
             return;
         }
         if cell.species == Species::Empty {
+            return;
+        }
+        if cell.species == Species::Sheep {
             return;
         }
         let mut dx = 0;
@@ -1082,6 +1125,18 @@ mod tests {
             rb: 0,
             clock: 0,
         };
+        for (x, y) in [
+            (9, 9),
+            (9, 10),
+            (9, 11),
+            (10, 9),
+            (10, 11),
+            (11, 9),
+            (11, 11),
+        ] {
+            let index = universe.get_index(x, y);
+            universe.cells[index].species = Species::Wall;
+        }
         universe.cells[plant_index].species = Species::Plant;
 
         for _ in 0..8 {
@@ -1092,6 +1147,64 @@ mod tests {
         assert_eq!((state.core_x, state.core_y), (10, 10));
         assert_eq!(state.direction, -1);
         assert_eq!(universe.cells[destination].species, Species::Water);
+    }
+
+    #[test]
+    fn sheep_changes_course_when_plant_path_is_blocked() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let blocker_index = universe.get_index(11, 10);
+        let plant_index = universe.get_index(15, 10);
+        universe.cells[blocker_index].species = Species::Wall;
+        universe.cells[plant_index].species = Species::Plant;
+        universe.sheep.get_mut(&1).unwrap().move_cooldown = 1;
+
+        universe.update_sheep_core(1, 10, 10);
+
+        let state = &universe.sheep[&1];
+        assert_ne!((state.core_x, state.core_y), (10, 10));
+        assert_ne!((state.core_x, state.core_y), (11, 10));
+        assert_eq!(universe.cells[blocker_index].species, Species::Wall);
+    }
+
+    #[test]
+    fn sheep_core_moves_before_body_cohesion() {
+        let mut universe = Universe::new(30, 30);
+        let core_index = universe.get_index(10, 10);
+        let near_body_index = universe.get_index(9, 10);
+        let distant_body_index = universe.get_index(10, 13);
+        let plant_index = universe.get_index(15, 10);
+        universe.cells[core_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_CORE,
+            clock: 0,
+        };
+        universe.cells[near_body_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_BODY,
+            clock: 0,
+        };
+        universe.cells[distant_body_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_BODY,
+            clock: 0,
+        };
+        universe.cells[plant_index].species = Species::Plant;
+        universe.rebuild_sheep_states();
+        universe.sheep.get_mut(&7).unwrap().move_cooldown = 1;
+
+        universe.update_sheep_core(7, 10, 10);
+
+        let cohesive_body = universe.cells[universe.get_index(11, 12)];
+        assert_eq!(
+            (cohesive_body.species, cohesive_body.ra, cohesive_body.rb),
+            (Species::Sheep, 7, SHEEP_BODY)
+        );
+        assert_eq!(cohesive_body.clock, universe.generation.wrapping_add(1));
+        assert_eq!(universe.cells[distant_body_index].species, Species::Empty);
     }
 
     #[test]
@@ -1176,5 +1289,94 @@ mod tests {
         assert!(!sheep_cells.is_empty());
         assert!(sheep_cells.len() <= 10);
         assert!(sheep_cells.iter().all(|cell| cell.ra == id));
+    }
+
+    #[test]
+    fn unobstructed_sheep_reaches_plant_adjacency_without_losing_pixels() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let id = 1;
+        let original_count = universe
+            .cells
+            .iter()
+            .filter(|cell| cell.species == Species::Sheep && cell.ra == id)
+            .count();
+        let plant_index = universe.get_index(15, 10);
+        universe.cells[plant_index].species = Species::Plant;
+
+        for _ in 0..8 {
+            let (core_x, core_y) = {
+                let state = &mut universe.sheep.get_mut(&id).unwrap();
+                state.move_cooldown = 1;
+                (state.core_x, state.core_y)
+            };
+            universe.update_sheep_core(id, core_x, core_y);
+        }
+
+        let state = &universe.sheep[&id];
+        assert_eq!((state.core_x, state.core_y), (14, 10));
+        assert_eq!(universe.cells[plant_index].species, Species::Plant);
+        let final_count = universe
+            .cells
+            .iter()
+            .filter(|cell| cell.species == Species::Sheep && cell.ra == id)
+            .count();
+        assert_eq!(final_count, original_count);
+    }
+
+    #[test]
+    fn foreign_sheep_body_is_neither_consumed_nor_retagged() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let foreign_index = universe.get_index(11, 10);
+        let plant_index = universe.get_index(15, 10);
+        universe.cells[foreign_index] = Cell {
+            species: Species::Sheep,
+            ra: 2,
+            rb: SHEEP_BODY,
+            clock: 0,
+        };
+        universe.cells[plant_index].species = Species::Plant;
+        universe.sheep.get_mut(&1).unwrap().move_cooldown = 1;
+
+        universe.update_sheep_core(1, 10, 10);
+
+        let foreign_body = universe.cells[foreign_index];
+        assert_eq!(
+            (foreign_body.species, foreign_body.ra, foreign_body.rb),
+            (Species::Sheep, 2, SHEEP_BODY)
+        );
+    }
+
+    #[test]
+    fn live_sheep_cannot_be_displaced_by_wind() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let core = universe.cells[universe.get_index(10, 10)];
+        let original_downwind = universe.cells[universe.get_index(11, 10)];
+
+        Universe::blow_wind(
+            core,
+            Wind {
+                dx: 126,
+                dy: 255,
+                pressure: 0,
+                density: 0,
+            },
+            SandApi {
+                universe: &mut universe,
+                x: 10,
+                y: 10,
+            },
+        );
+
+        let original_position = universe.cells[universe.get_index(10, 10)];
+        let downwind_position = universe.cells[universe.get_index(11, 10)];
+        assert_eq!(original_position, core);
+        assert_eq!(downwind_position, original_downwind);
+        assert_eq!(
+            (universe.sheep[&1].core_x, universe.sheep[&1].core_y),
+            (10, 10)
+        );
     }
 }
