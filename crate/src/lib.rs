@@ -11,9 +11,27 @@ mod utils;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::SplitMix64;
 use species::Species;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use wasm_bindgen::prelude::*;
 // use web_sys::console;
+
+const SHEEP_BODY: u8 = 0;
+const SHEEP_CORE: u8 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SheepState {
+    core_x: i32,
+    core_y: i32,
+    energy: u16,
+    size: u8,
+    direction: i8,
+    move_cooldown: u8,
+    eat_cooldown: u8,
+    mature_steps: Option<u16>,
+    starvation_steps: u16,
+    submerged_steps: u16,
+    dying_steps: Option<u8>,
+}
 
 #[wasm_bindgen]
 #[repr(C)]
@@ -66,6 +84,8 @@ pub struct Universe {
     burns: Vec<Wind>,
     generation: u8,
     rng: SplitMix64,
+    sheep: HashMap<u8, SheepState>,
+    next_sheep_id: u8,
 }
 
 pub struct SandApi<'a> {
@@ -176,6 +196,8 @@ impl Universe {
                 self.cells[idx] = EMPTY_CELL;
             }
         }
+        self.sheep.clear();
+        self.next_sheep_id = 1;
     }
     pub fn tick(&mut self) {
         // let mut next = self.cells.clone();
@@ -294,6 +316,7 @@ impl Universe {
             Some(state) => self.cells = state,
             None => (),
         };
+        self.rebuild_sheep_states();
     }
 
     pub fn flush_undos(&mut self) {
@@ -329,6 +352,56 @@ impl Universe {
             winds,
             generation: 0,
             rng,
+            sheep: HashMap::new(),
+            next_sheep_id: 1,
+        }
+    }
+
+    pub fn rebuild_sheep_states(&mut self) {
+        let mut sheep_cells: HashMap<u8, Vec<(usize, i32, i32, bool)>> = HashMap::new();
+
+        for x in 0..self.width {
+            for y in 0..self.height {
+                let index = self.get_index(x, y);
+                let cell = self.cells[index];
+                if cell.species == Species::Sheep {
+                    let is_core = match cell.rb {
+                        SHEEP_CORE => true,
+                        SHEEP_BODY => false,
+                        _ => false,
+                    };
+                    sheep_cells
+                        .entry(cell.ra)
+                        .or_default()
+                        .push((index, x, y, is_core));
+                }
+            }
+        }
+
+        self.sheep.clear();
+        for (id, cells) in sheep_cells {
+            let (core_index, core_x, core_y, _) = cells
+                .iter()
+                .find(|(_, _, _, is_core)| *is_core)
+                .unwrap_or(&cells[0]);
+            let size = cells.len().min(10) as u8;
+            self.cells[*core_index].rb = SHEEP_CORE;
+            self.sheep.insert(
+                id,
+                SheepState {
+                    core_x: *core_x,
+                    core_y: *core_y,
+                    energy: 100,
+                    size,
+                    direction: 1,
+                    move_cooldown: 8,
+                    eat_cooldown: 20,
+                    mature_steps: if size == 10 { Some(800) } else { None },
+                    starvation_steps: 0,
+                    submerged_steps: 0,
+                    dying_steps: None,
+                },
+            );
         }
     }
 }
@@ -438,5 +511,131 @@ impl Universe {
         }
 
         cell.update(api);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rebuild_groups_sheep_pixels_by_id() {
+        let mut universe = Universe::new(20, 20);
+        let core_index = universe.get_index(5, 5);
+        let body_index = universe.get_index(6, 5);
+        universe.cells[core_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_CORE,
+            clock: 0,
+        };
+        universe.cells[body_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_BODY,
+            clock: 0,
+        };
+
+        universe.rebuild_sheep_states();
+
+        let sheep = universe.sheep.get(&7).unwrap();
+        assert_eq!((sheep.core_x, sheep.core_y), (5, 5));
+        assert_eq!(sheep.size, 2);
+    }
+
+    #[test]
+    fn rebuild_marks_the_first_pixel_as_core_when_none_is_marked() {
+        let mut universe = Universe::new(20, 20);
+        let first_index = universe.get_index(3, 4);
+        let second_index = universe.get_index(3, 5);
+        universe.cells[first_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_BODY,
+            clock: 0,
+        };
+        universe.cells[second_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_BODY,
+            clock: 0,
+        };
+
+        universe.rebuild_sheep_states();
+
+        let sheep = universe.sheep.get(&7).unwrap();
+        assert_eq!((sheep.core_x, sheep.core_y), (3, 4));
+        assert_eq!(universe.cells[first_index].rb, SHEEP_CORE);
+    }
+
+    #[test]
+    fn pop_undo_rebuilds_sheep_state_from_restored_cells() {
+        let mut universe = Universe::new(20, 20);
+        universe.push_undo();
+        let sheep_index = universe.get_index(10, 10);
+        universe.cells[sheep_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_CORE,
+            clock: 0,
+        };
+        universe.rebuild_sheep_states();
+        assert!(universe.sheep.contains_key(&7));
+
+        universe.pop_undo();
+
+        assert!(universe.sheep.is_empty());
+    }
+
+    #[test]
+    fn reset_clears_sheep_state_and_resets_the_next_id() {
+        let mut universe = Universe::new(20, 20);
+        let sheep_index = universe.get_index(10, 10);
+        universe.cells[sheep_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_CORE,
+            clock: 0,
+        };
+        universe.rebuild_sheep_states();
+        universe.next_sheep_id = 7;
+
+        universe.reset();
+
+        assert!(universe.sheep.is_empty());
+        assert_eq!(universe.next_sheep_id, 1);
+    }
+
+    #[test]
+    fn rebuild_uses_default_state_and_caps_size_at_ten() {
+        let mut universe = Universe::new(20, 20);
+        for x in 0..11 {
+            let index = universe.get_index(x, 0);
+            universe.cells[index] = Cell {
+                species: Species::Sheep,
+                ra: 7,
+                rb: SHEEP_BODY,
+                clock: 0,
+            };
+        }
+
+        universe.rebuild_sheep_states();
+
+        assert_eq!(
+            universe.sheep.get(&7),
+            Some(&SheepState {
+                core_x: 0,
+                core_y: 0,
+                energy: 100,
+                size: 10,
+                direction: 1,
+                move_cooldown: 8,
+                eat_cooldown: 20,
+                mature_steps: Some(800),
+                starvation_steps: 0,
+                submerged_steps: 0,
+                dying_steps: None,
+            })
+        );
     }
 }
