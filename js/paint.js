@@ -124,7 +124,7 @@ const handleTouches = (event) => {
   if (touches.length == 1) {
     smoothPaint(touches[0]);
   } else {
-    touches.forEach(paint);
+    touches.forEach((touch) => paint(touch));
   }
 };
 

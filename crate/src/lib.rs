@@ -612,6 +612,60 @@ mod tests {
     }
 
     #[test]
+    fn spawn_sheep_uses_only_free_in_bounds_cells_at_an_edge() {
+        let mut universe = Universe::new(2, 2);
+
+        assert!(universe.spawn_sheep(0, 0));
+
+        let sheep_cells: Vec<Cell> = universe
+            .cells
+            .iter()
+            .copied()
+            .filter(|cell| cell.species == Species::Sheep)
+            .collect();
+        assert_eq!(sheep_cells.len(), 2);
+        assert_eq!(universe.cells[universe.get_index(0, 0)].rb, SHEEP_CORE);
+        assert_eq!(universe.cells[universe.get_index(1, 0)].rb, SHEEP_BODY);
+        assert_eq!(universe.sheep.get(&1).unwrap().size, 2);
+    }
+
+    #[test]
+    fn spawn_sheep_allocates_unique_sequential_ids() {
+        let mut universe = Universe::new(20, 20);
+
+        assert!(universe.spawn_sheep(5, 5));
+        assert!(universe.spawn_sheep(15, 15));
+
+        assert!(universe.sheep.contains_key(&1));
+        assert!(universe.sheep.contains_key(&2));
+        assert_eq!(universe.next_sheep_id, 3);
+    }
+
+    #[test]
+    fn spawn_sheep_initializes_newborn_state() {
+        let mut universe = Universe::new(20, 20);
+
+        assert!(universe.spawn_sheep(10, 10));
+
+        assert_eq!(
+            universe.sheep.get(&1),
+            Some(&SheepState {
+                core_x: 10,
+                core_y: 10,
+                energy: 100,
+                size: 5,
+                direction: 1,
+                move_cooldown: 8,
+                eat_cooldown: 20,
+                mature_steps: None,
+                starvation_steps: 0,
+                submerged_steps: 0,
+                dying_steps: None,
+            })
+        );
+    }
+
+    #[test]
     fn rebuild_groups_sheep_pixels_by_id() {
         let mut universe = Universe::new(20, 20);
         let core_index = universe.get_index(5, 5);
