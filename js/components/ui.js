@@ -36,6 +36,8 @@ const elementNames = {
   Dust: "尘粉",
   Oil: "油",
   Rocket: "火箭",
+  Sheep: "羊",
+  Carcass: "遗骸",
 };
 
 const ElementButton = (name, selectedElement, setElement) => {
@@ -479,6 +481,7 @@ class Index extends React.Component {
         </button>
         {Object.keys(Species)
           .filter((x) => !Number.isInteger(Number.parseInt(x)))
+          .filter((name) => name !== "Carcass")
           .map((n) =>
             ElementButton(n, selectedElement, (id) =>
               this.setState({ selectedElement: id })

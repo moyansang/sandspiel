@@ -28,6 +28,8 @@ pub enum Species {
     Plant = 11,
     Fungus = 18,
     Seed = 19,
+    Sheep = 20,
+    Carcass = 21,
     Fire = 6,
     Lava = 8,
     Acid = 12,
@@ -61,6 +63,8 @@ impl Species {
             Species::Oil => update_oil(cell, api),
             Species::Fungus => update_fungus(cell, api),
             Species::Seed => update_seed(cell, api),
+            Species::Sheep => update_sheep(cell, api),
+            Species::Carcass => update_carcass(cell, api),
             // Species::X => update_x(cell, api),
         }
     }
@@ -162,6 +166,14 @@ pub fn update_stone(cell: Cell, mut api: SandApi) {
     } else {
         api.set(0, 0, cell);
     }
+}
+
+pub fn update_sheep(cell: Cell, mut api: SandApi) {
+    api.set(0, 0, cell);
+}
+
+pub fn update_carcass(cell: Cell, api: SandApi) {
+    update_stone(cell, api);
 }
 
 pub fn update_water(cell: Cell, mut api: SandApi) {
@@ -1040,6 +1052,17 @@ pub fn update_seed(cell: Cell, mut api: SandApi) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Species;
+
+    #[test]
+    fn sheep_and_carcass_have_stable_serialized_ids() {
+        assert_eq!(Species::Sheep as u8, 20);
+        assert_eq!(Species::Carcass as u8, 21);
     }
 }
 

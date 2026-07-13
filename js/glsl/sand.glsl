@@ -129,6 +129,14 @@ void main() {
     hue = fract(fract(data.b * 2.) * 0.5) - 0.3;
     saturation = 0.7 * (data.g + 0.4) + data.b * 0.2;
     lightness = 0.9 * (data.g + 0.9);
+  } else if (type == 20) { // sheep
+    hue = 0.0;
+    saturation = 0.04;
+    lightness = 0.92 + data.b * 0.06;
+  } else if (type == 21) { // carcass
+    hue = 0.08;
+    saturation = 0.08;
+    lightness = 0.58 + data.g * 0.18;
   }
   if (isSnapshot == false) {
     lightness *= (0.975 + snoise2(floor(uv * resolution / dpi)) * 0.025);

@@ -366,6 +366,8 @@ impl Universe {
 
             Species::Stone => 70,
             Species::Wood => 70,
+            Species::Sheep => 70,
+            Species::Carcass => 70,
 
             Species::Plant => 60,
             Species::Lava => 60,
