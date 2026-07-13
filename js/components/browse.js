@@ -25,10 +25,10 @@ class Submissions extends React.Component {
     let { submissions, voteFromBrowse, browseVotes, report } = this.props;
 
     if (!submissions) {
-      return <div style={{ height: "90vh" }}>Loading Submissions...</div>;
+      return <div style={{ height: "90vh" }}>正在加载作品...</div>;
     }
     if (submissions.length == 0) {
-      return <div style={{ height: "90vh" }}>Didn't find anything!</div>;
+      return <div style={{ height: "90vh" }}>没有找到内容！</div>;
     }
 
     return (
@@ -187,38 +187,17 @@ class Browse extends React.Component {
     return (
       <React.Fragment>
         <SignInScreen />
-        <p style={{ gridColumn: "auto / span 2", margin: "8px", fontSize: 16 }}>
-          Check out ☞<br></br>
-          <a href="https://studio.sandspiel.club" target="_blank">
-            {" "}
-            <b> SANDSPIEL STUDIO: Invent New Elements!</b>
-          </a>
-          <br></br>
-          <a href="https://orb.farm" target="_blank">
-            {" "}
-            Orb.Farm
-          </a>
-          {"          \xa0        \xa0\xa0\xa0    "}
-          <br></br>
-          <a href="https://www.youtube.com/watch?v=2qfjJ-0ZeVM" target="_blank">
-            {" "}
-            "Top 9 ways to make Water"
-          </a>
-        </p>
-        <NavLink exact to="/browse/">
-          <button>New</button>
-        </NavLink>
         <NavLink to="/browse/top/day/">
-          <button>Day</button>
+          <button>今日</button>
         </NavLink>
         <NavLink to="/browse/top/week/">
-          <button>Week</button>
+          <button>本周</button>
         </NavLink>
         <NavLink to="/browse/top/month/">
-          <button>Month</button>
+          <button>本月</button>
         </NavLink>
         <NavLink exact to="/browse/top/">
-          <button>Year </button>
+          <button>全年</button>
         </NavLink>
         <span style={{ display: "inline-block" }}>
           <input
@@ -228,7 +207,7 @@ class Browse extends React.Component {
               e.keyCode == 13 && // I think that's enter
               this.props.history.push(`/browse/search/?title=${search}`)
             }
-            placeholder="search"
+            placeholder="搜索"
           />
           {search && (
             <NavLink
@@ -237,7 +216,7 @@ class Browse extends React.Component {
                 search: `?title=${search}`,
               }}
             >
-              <button>Search</button>
+              <button>搜索</button>
             </NavLink>
           )}
         </span>

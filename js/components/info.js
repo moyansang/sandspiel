@@ -3,88 +3,79 @@ import React from "react";
 const Info = () => {
   return (
     <div className="Info">
-      <h1>Sandspiel </h1>
+      <h1>Sandspiel</h1>
       <p>
-        Created by <a href="https://maxbittker.com">max bittker</a>
+        作者：<a href="https://maxbittker.com">max bittker</a>
       </p>
       <hr />
       <br />
       <p>
-        Welcome, and thanks for coming by! I hope that you enjoy exploring this
-        small game, and it brings you some calm.{" "}
+        欢迎来玩！希望你在这个小小的物理沙盒里探索材料、制造反应，也获得一点放松。
       </p>
       <p>
-        Growing up, "falling sand" games like this one provided me hours of
-        entertainment and imagination. I want to particularly thank ha55ii's{" "}
-        <a href="https://dan-ball.jp/en/javagame/dust/">Powder Game</a> as the
-        primary inspiration for sandspiel.
+        这类“落沙游戏”曾带来很多想象力和乐趣。Sandspiel 的主要灵感来自 ha55ii 的{" "}
+        <a href="https://dan-ball.jp/en/javagame/dust/">Powder Game</a>。
       </p>
       <br />
       <p>
-        If you want to read more the inspiration, architecture, and history of
-        the game, I wrote a blog post (it gets technical in the middle):&nbsp;
+        想了解灵感、架构和制作历史，可以阅读作者的技术博客：{" "}
         <a href="https://maxbittker.com/making-sandspiel">Making Sandspiel</a>
       </p>
       <br />
       <p>
-        If you'd like, you can view the{" "}
-        <a href="https://github.com/maxbittker/sandspiel">source code</a> or{" "}
-        <a href="https://github.com/maxbittker/sandspiel/issues">report bugs</a>{" "}
-        on github or feel free to reach out on twitter and I'll try to answer!
+        你也可以查看{" "}
+        <a href="https://github.com/maxbittker/sandspiel">源代码</a>，或在 GitHub{" "}
+        <a href="https://github.com/maxbittker/sandspiel/issues">反馈问题</a>。
       </p>
       <br />
       <p>
-        Lastly, I want to say that if you enjoy this game or share your artwork
-        on it, your opinion is important to me and I want to do my best to
-        ensure sandspiel is a friendly and kind place to play, without bullying,
-        racism, transphobia, homophobia, or any other forms of bigotry. If something is wrong or there's some way I can
-        help, feel free to contact me at <a href="mailto:maxbittker@gmail.com">maxbittker@gmail.com</a> or <a href="https://twitter.com/maxbittker">@maxbittker on twitter.</a>
+        请友善创作和分享作品。这里应该是一个没有欺凌、种族歧视、跨性别恐惧、同性恋恐惧或其他偏见的游玩空间。
+        如果有什么不对，欢迎联系作者：{" "}
+        <a href="mailto:maxbittker@gmail.com">maxbittker@gmail.com</a> 或{" "}
+        <a href="https://twitter.com/maxbittker">Twitter @maxbittker</a>。
       </p>
       <br />
       <hr />
       <br />
-      <h2>Element Information:</h2>
-      <h4>Wall </h4>
-      Indestructible.
-      <h4>Sand </h4>
-      Sinks in water.
-      <h4>Water </h4>
-      Puts out fire.
-      <h4>Stone </h4>
-      Forms arches, turns into sand under pressure.
-      <h4>Ice </h4>
-      Freezes Water, slippery!
-      <h4>Gas </h4>
-      Highly Flammable!
-      <h4>Cloner </h4>
-      Copies the first element it touches. 
-      <h4>Mite </h4>
-      Eats wood and plant, but loves dust! Slides on ice..
-      <h4>Wood </h4>
-      Sturdy, but biodegradable.
-      <h4>Plant </h4>
-      Thrives in wet enviroments.
-      <h4>Fungus </h4>
-      Spreads over everything.
-      <h4>Seed </h4>
-      Grows on sand, plant, and fungus.
-      <h4>Fire </h4>
-      Hot!
-      <h4>Lava </h4>
-      Flammable and heavy.
-      <h4>Acid </h4>
-      Corrodes other elements.
-      <h4>Dust </h4>
-      Pretty, but dangerously explosive.
-      <h4>Oil </h4>
-      Produces smoke when set on fire.
-      <h4>Rocket </h4>
-      Explodes into copies of the first element it touches.
-      <h4>Empty </h4>
-      Erases.
-      <hr />
-      <hr />
-      <hr />
+      <h2>元素说明：</h2>
+      <h4>墙</h4>
+      不可破坏。
+      <h4>沙子</h4>
+      会沉入水中。
+      <h4>水</h4>
+      可以灭火。
+      <h4>石头</h4>
+      会形成拱形结构，在压力下会变成沙子。
+      <h4>冰</h4>
+      会冻结水，而且很滑。
+      <h4>气体</h4>
+      非常易燃。
+      <h4>复制器</h4>
+      会复制它接触到的第一个元素。
+      <h4>螨虫</h4>
+      会吃木头和植物，但喜欢尘粉；在冰上会滑动。
+      <h4>木头</h4>
+      结实，但会被自然分解。
+      <h4>植物</h4>
+      在潮湿环境中生长得更好。
+      <h4>真菌</h4>
+      会在各种材料上蔓延。
+      <h4>种子</h4>
+      会在沙子、植物和真菌上生长。
+      <h4>火</h4>
+      很热。
+      <h4>岩浆</h4>
+      易燃，而且很重。
+      <h4>酸液</h4>
+      会腐蚀其他元素。
+      <h4>尘粉</h4>
+      很漂亮，但有爆炸风险。
+      <h4>油</h4>
+      被点燃时会产生烟雾。
+      <h4>火箭</h4>
+      会爆炸成它接触到的第一个元素的副本。
+      <h4>橡皮</h4>
+      用来擦除。
       <hr />
     </div>
   );

@@ -3,6 +3,31 @@ import { NavLink } from "react-router-dom";
 
 import FirebaseAuth from "react-firebaseui/FirebaseAuth";
 
+function translateFirebaseUiLabels() {
+  const replacements = {
+    "Sign in with email": "使用邮箱登录",
+    Email: "邮箱",
+    NEXT: "下一步",
+    Next: "下一步",
+    Back: "返回",
+    Cancel: "取消",
+    "Enter your email": "请输入邮箱",
+  };
+
+  document.querySelectorAll(".firebaseui-container *").forEach((node) => {
+    const text = node.textContent && node.textContent.trim();
+    if (replacements[text] && node.children.length === 0) {
+      node.textContent = replacements[text];
+    }
+    if (node.placeholder && replacements[node.placeholder]) {
+      node.placeholder = replacements[node.placeholder];
+    }
+    if (node.getAttribute("aria-label") && replacements[node.getAttribute("aria-label")]) {
+      node.setAttribute("aria-label", replacements[node.getAttribute("aria-label")]);
+    }
+  });
+}
+
 class SignInScreen extends React.Component {
   // The component's Local state.
   state = {
@@ -50,11 +75,13 @@ class SignInScreen extends React.Component {
     this.unregisterAuthObserver = firebase
       .auth()
       .onAuthStateChanged((user) => this.setState({ isSignedIn: !!user }));
+    this.translateFirebaseTimer = window.setInterval(translateFirebaseUiLabels, 250);
   }
 
   // Make sure we un-register Firebase observers when the component unmounts.
   componentWillUnmount() {
     this.unregisterAuthObserver();
+    window.clearInterval(this.translateFirebaseTimer);
   }
 
   render() {
@@ -63,11 +90,11 @@ class SignInScreen extends React.Component {
         return (
           <span>
             <p>
-              Please{" "}
+              请先{" "}
               <button onClick={() => this.setState({ expanded: true })}>
-                Sign in
+                登录
               </button>{" "}
-              to vote!{" "}
+              后再投票！{" "}
             </p>
             <span style={{ display: "none" }}>
               {/* gross hack for completing login */}
@@ -81,7 +108,7 @@ class SignInScreen extends React.Component {
       } else {
         return (
           <>
-            Sign-in to post and to vote!
+            登录后可以发布和投票！
             <FirebaseAuth
               uiConfig={this.uiConfig}
               firebaseAuth={firebase.auth()}
@@ -102,19 +129,19 @@ class SignInScreen extends React.Component {
               search: `?user=${currentUser.uid}`,
             }}
           >
-            [Post History]
+            [发布历史]
           </NavLink>
           {!currentUser.emailVerified &&
-            `Please Verify your email ${currentUser.email} to vote!`}
+            `请验证邮箱 ${currentUser.email} 后再投票！`}
           <button
             style={{ flexGrow: 0, margin: "0 10px" }}
             onClick={() => {
-              if (window.confirm("Sign out?")) {
+              if (window.confirm("确定要退出登录吗？")) {
                 firebase.auth().signOut();
               }
             }}
           >
-            Sign-out
+            退出登录
           </button>
         </div>
       </div>

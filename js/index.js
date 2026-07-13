@@ -140,5 +140,12 @@ document.addEventListener("paste", function (event) {
   }
 });
 
-(adsbygoogle = window.adsbygoogle || []).push({});
+try {
+  (window.adsbygoogle = window.adsbygoogle || []).push({});
+} catch (error) {
+  if (!window.location.host.startsWith("localhost")) {
+    throw error;
+  }
+  console.warn("Skipping local ad slot:", error);
+}
 export { canvas, width, height, universe, reset };

@@ -66,7 +66,7 @@ const fps = new (class {
       }
     }
     // Render the statistics.
-    this.fps.textContent = `FPS:${Math.round(mean)}`;
+    this.fps.textContent = `帧率:${Math.round(mean)}`;
   }
 })();
 

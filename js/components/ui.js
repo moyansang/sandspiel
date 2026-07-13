@@ -10,13 +10,33 @@ import { height, universe, width, reset } from "../index.js";
 import { snapshot, pallette } from "../render.js";
 import { functions, storage } from "../api.js";
 import SignInButton from "./signinButton.js";
-import Promotab from "./promotab";
 import { svgToImageData, rgbaToSpecies } from "../convertSVG";
 
 import Menu from "./menu";
 
 window.species = Species;
 let pallette_data = pallette();
+const elementNames = {
+  Empty: "橡皮",
+  Wall: "墙",
+  Sand: "沙子",
+  Water: "水",
+  Stone: "石头",
+  Ice: "冰",
+  Gas: "气体",
+  Cloner: "复制器",
+  Mite: "螨虫",
+  Wood: "木头",
+  Plant: "植物",
+  Fungus: "真菌",
+  Seed: "种子",
+  Fire: "火",
+  Lava: "岩浆",
+  Acid: "酸液",
+  Dust: "尘粉",
+  Oil: "油",
+  Rocket: "火箭",
+};
 
 const ElementButton = (name, selectedElement, setElement) => {
   let elementID = Species[name];
@@ -51,7 +71,7 @@ const ElementButton = (name, selectedElement, setElement) => {
       }}
     >
       {"  "}
-      {name}
+      {elementNames[name] || name}
       {"  "}
     </button>
   );
@@ -126,7 +146,7 @@ class Index extends React.Component {
     });
   }
   reset() {
-    if (window.confirm("Are you sure you want to reset?")) {
+    if (window.confirm("确定要重置吗？")) {
       this.play();
       window.location = "#";
       this.setState({ currentSubmission: null });
@@ -384,7 +404,6 @@ class Index extends React.Component {
         : "";
     return (
       <React.Fragment>
-        <Promotab />
         <button
           onClick={() => this.togglePause()}
           className={paused ? "selected" : ""}
@@ -403,26 +422,26 @@ class Index extends React.Component {
 
         {!window.location.pathname.includes("school") && (
           <>
-            <button onClick={() => this.upload()}>Upload</button>
+            <button onClick={() => this.upload()}>上传</button>
             <Link
               to={{
                 pathname: "/browse/",
                 hash,
               }}
             >
-              <button>Browse</button>
+              <button>浏览</button>
             </Link>
           </>
         )}
 
-        <button onClick={() => this.reset()}>Reset</button>
+        <button onClick={() => this.reset()}>重置</button>
         <Link
           to={{
             pathname: "/info/",
             hash,
           }}
         >
-          <button>Info</button>
+          <button>说明</button>
         </Link>
 
         {/* {paused && <button onClick={() => universe.tick()}>Tick</button>} */}
@@ -456,7 +475,7 @@ class Index extends React.Component {
             this.setState({ selectedElement: -1 });
           }}
         >
-          Wind
+          风
         </button>
         {Object.keys(Species)
           .filter((x) => !Number.isInteger(Number.parseInt(x)))
@@ -482,24 +501,23 @@ class Index extends React.Component {
 
         {this.state.submissionMenuOpen && (
           <Menu close={() => this.closeMenu()}>
-            <h4>Share your creation with the people! (try using #hashtags)</h4>
+            <h4>分享你的作品！可以试试使用 #标签</h4>
             <p>
-              Please be nice. Users who post hateful or sexually explicit
-              content will be banned.
+              请友善发布内容。仇恨、骚扰或露骨内容会被禁止。
             </p>
             <img src={this.state.data.dataURL} className="submissionImg" />
             <SignInButton>
               <div style={{ display: "flex" }}>
                 <input
                   maxlength="200"
-                  placeholder="Title"
+                  placeholder="标题"
                   onChange={(e) => this.setState({ title: e.target.value })}
                 />
                 <button
                   disabled={this.state.submitting || this.rateLimited()}
                   onClick={() => this.submit()}
                 >
-                  Submit
+                  提交
                 </button>
               </div>
             </SignInButton>

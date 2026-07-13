@@ -26,7 +26,7 @@ class Submissions extends React.Component {
     let { submissions, voteFromBrowse, browseVotes, judge, banIP } = this.props;
 
     if (!submissions) {
-      return <div style={{ height: "90vh" }}>Loading Submissions...</div>;
+      return <div style={{ height: "90vh" }}>正在加载作品...</div>;
     }
     if (submissions.length == 0) {
       return (
@@ -99,28 +99,28 @@ class Submissions extends React.Component {
                 <div className="adminButtons">
                   <button
                     className="IPBAN"
-                    title="ban IP and user"
+                    title="封禁 IP 和用户"
                     onClick={() => banIP(submission.id)}
                   >
                     IP
                   </button>
                   <button
                     className="BAN"
-                    title="ban user"
+                    title="封禁用户"
                     onClick={() => judge(submission.id, 2)}
                   >
-                    ban 
+                    封禁
                   </button>
                   <button
                     className="delete"
-                    title="delete"
+                    title="删除"
                     onClick={() => judge(submission.id, true)}
                   >
                     delete
                   </button>
                   <button
                     className="pardon"
-                    title="pardon"
+                    title="恢复"
                     onClick={() => judge(submission.id, false)}
                   >
                     pardon
@@ -231,7 +231,7 @@ class AdminBrowse extends React.Component {
       });
   }
   banIP(id) {
-    if (!confirm("Ban this IP address? This will ban ALL content from this IP.")) {
+    if (!confirm("确定要封禁这个 IP 地址吗？这会封禁来自该 IP 的所有内容。")) {
       return;
     }
     this.setState(({ decidedIds }) => ({
@@ -251,7 +251,7 @@ class AdminBrowse extends React.Component {
           .then((res) => res.json())
           .then((data) => {
             console.log("IP ban result:", data);
-            alert(`Successfully banned IP ${data.ip}. Removed ${data.banned_count} creations.`);
+            alert(`已封禁 IP ${data.ip}，并移除了 ${data.banned_count} 个作品。`);
             n++;
             if (n > 20) {
               this.loadSubmissions();
@@ -260,7 +260,7 @@ class AdminBrowse extends React.Component {
           })
           .catch((e) => {
             console.error(e);
-            alert("Error banning IP");
+            alert("封禁 IP 时出错");
           });
       });
   }
@@ -277,11 +277,11 @@ class AdminBrowse extends React.Component {
     return (
       <React.Fragment>
         <SignInScreen />
-        <h2 style={{ display: "inline-block" }}>do it for doona </h2>
+        <h2 style={{ display: "inline-block" }}>后台审核</h2>
 
         {submissions && <h3>{submissions.length} actionable reports:</h3>}
         <NavLink to="/browse/">
-          <button>Browse new</button>
+          <button>浏览待审作品</button>
         </NavLink>
         <Submissions
           submissions={submissions}
