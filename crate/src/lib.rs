@@ -17,6 +17,8 @@ use wasm_bindgen::prelude::*;
 
 const SHEEP_BODY: u8 = 0;
 const SHEEP_CORE: u8 = 1;
+const SHEEP_ROLE_MASK: u8 = 1;
+const SHEEP_STRAY_LIMIT: u8 = 30;
 const NEWBORN_SHAPE: [(i32, i32, u8); 5] = [
     (0, 0, SHEEP_CORE),
     (-1, 0, SHEEP_BODY),
@@ -433,11 +435,7 @@ impl Universe {
                 let index = self.get_index(x, y);
                 let cell = self.cells[index];
                 if cell.species == Species::Sheep {
-                    let is_core = match cell.rb {
-                        SHEEP_CORE => true,
-                        SHEEP_BODY => false,
-                        _ => false,
-                    };
+                    let is_core = cell.rb & SHEEP_ROLE_MASK == SHEEP_CORE;
                     sheep_cells
                         .entry(cell.ra)
                         .or_default()
@@ -476,6 +474,238 @@ impl Universe {
 
 //private methods
 impl Universe {
+    fn in_bounds(&self, x: i32, y: i32) -> bool {
+        x >= 0 && x < self.width && y >= 0 && y < self.height
+    }
+
+    fn checked_index(&self, x: i32, y: i32) -> Option<usize> {
+        self.in_bounds(x, y).then(|| self.get_index(x, y))
+    }
+
+    fn checked_cell(&self, x: i32, y: i32) -> Option<Cell> {
+        self.checked_index(x, y).map(|index| self.cells[index])
+    }
+
+    fn set_checked_cell(&mut self, x: i32, y: i32, mut cell: Cell) -> bool {
+        let index = match self.checked_index(x, y) {
+            Some(index) => index,
+            None => return false,
+        };
+        cell.clock = self.generation.wrapping_add(1);
+        self.cells[index] = cell;
+        true
+    }
+
+    fn nearest_plant_direction(&self, x: i32, y: i32, radius: i32) -> Option<(i32, i32)> {
+        for distance in 1..=radius.clamp(0, 5) {
+            for dx in -distance..=distance {
+                let dy_magnitude = distance - dx.abs();
+                let dy_candidates = if dy_magnitude == 0 {
+                    [0, 0]
+                } else {
+                    [-dy_magnitude, dy_magnitude]
+                };
+
+                for (candidate_index, dy) in dy_candidates.iter().copied().enumerate() {
+                    if candidate_index == 1 && dy_magnitude == 0 {
+                        continue;
+                    }
+                    if self
+                        .checked_cell(x + dx, y + dy)
+                        .map(|cell| cell.species == Species::Plant)
+                        .unwrap_or(false)
+                    {
+                        return Some((dx.signum(), dy.signum()));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn update_sheep_core(&mut self, id: u8, x: i32, y: i32) {
+        let (core_x, core_y, move_cooldown, mut direction) = match self.sheep.get(&id) {
+            Some(state) => (
+                state.core_x,
+                state.core_y,
+                state.move_cooldown,
+                state.direction,
+            ),
+            None => return,
+        };
+        if (x, y) != (core_x, core_y) {
+            return;
+        }
+
+        self.update_sheep_bodies(id, core_x, core_y);
+
+        if move_cooldown > 1 {
+            self.sheep.get_mut(&id).unwrap().move_cooldown -= 1;
+            return;
+        }
+
+        let plant_direction = self.nearest_plant_direction(core_x, core_y, 5);
+        if plant_direction.is_none() && self.rng.gen_range(0..20) == 0 {
+            direction = -direction;
+        }
+        let (dx, dy) = plant_direction.unwrap_or((direction as i32, 0));
+        if dx != 0 {
+            direction = dx as i8;
+        }
+        let new_x = core_x + dx;
+        let new_y = core_y + dy;
+        let destination = self.checked_cell(new_x, new_y);
+        let can_enter = destination
+            .map(|cell| {
+                cell.species == Species::Empty
+                    || (cell.species == Species::Sheep
+                        && cell.ra == id
+                        && cell.rb & SHEEP_ROLE_MASK == SHEEP_BODY)
+            })
+            .unwrap_or(false);
+        let next_cooldown = 8 + self.rng.gen_range(0..5) as u8;
+
+        if !can_enter {
+            let state = self.sheep.get_mut(&id).unwrap();
+            state.direction = -direction;
+            state.move_cooldown = next_cooldown;
+            return;
+        }
+
+        let destination_is_body = destination
+            .map(|cell| cell.species == Species::Sheep && cell.ra == id)
+            .unwrap_or(false);
+        let replacement_body = if destination_is_body {
+            Some((new_x, new_y))
+        } else {
+            self.nearest_sheep_body(id, core_x, core_y)
+        };
+        if let Some((body_x, body_y)) = replacement_body {
+            if (body_x, body_y) != (new_x, new_y) {
+                self.set_checked_cell(body_x, body_y, EMPTY_CELL);
+            }
+            self.set_checked_cell(
+                core_x,
+                core_y,
+                Cell {
+                    species: Species::Sheep,
+                    ra: id,
+                    rb: SHEEP_BODY,
+                    clock: 0,
+                },
+            );
+        } else {
+            self.set_checked_cell(core_x, core_y, EMPTY_CELL);
+        }
+        self.set_checked_cell(
+            new_x,
+            new_y,
+            Cell {
+                species: Species::Sheep,
+                ra: id,
+                rb: SHEEP_CORE,
+                clock: 0,
+            },
+        );
+
+        let state = self.sheep.get_mut(&id).unwrap();
+        state.core_x = new_x;
+        state.core_y = new_y;
+        state.direction = direction;
+        state.move_cooldown = next_cooldown;
+    }
+
+    fn update_sheep_bodies(&mut self, id: u8, core_x: i32, core_y: i32) {
+        let mut body_positions = Vec::new();
+        for body_x in 0..self.width {
+            for body_y in 0..self.height {
+                let cell = self.cells[self.get_index(body_x, body_y)];
+                if cell.species == Species::Sheep
+                    && cell.ra == id
+                    && cell.rb & SHEEP_ROLE_MASK == SHEEP_BODY
+                {
+                    body_positions.push((body_x, body_y));
+                }
+            }
+        }
+
+        for (body_x, body_y) in body_positions {
+            let body_index = self.get_index(body_x, body_y);
+            let body = self.cells[body_index];
+            if body.species != Species::Sheep
+                || body.ra != id
+                || body.rb & SHEEP_ROLE_MASK != SHEEP_BODY
+            {
+                continue;
+            }
+
+            let distance = (body_x - core_x).abs().max((body_y - core_y).abs());
+            if distance <= 2 {
+                self.cells[body_index].rb &= SHEEP_ROLE_MASK;
+                continue;
+            }
+
+            let new_x = body_x + (core_x - body_x).signum();
+            let new_y = body_y + (core_y - body_y).signum();
+            let destination_index = self.checked_index(new_x, new_y);
+            let can_move = destination_index
+                .map(|index| self.cells[index].species == Species::Empty)
+                .unwrap_or(false);
+            let remaining_distance = (new_x - core_x).abs().max((new_y - core_y).abs());
+            let remains_far = if can_move {
+                remaining_distance > 4
+            } else {
+                distance > 4
+            };
+            let stranded_count = if remains_far {
+                (body.rb >> 1).saturating_add(1)
+            } else {
+                0
+            };
+
+            if stranded_count >= SHEEP_STRAY_LIMIT {
+                self.set_checked_cell(body_x, body_y, EMPTY_CELL);
+                if let Some(state) = self.sheep.get_mut(&id) {
+                    state.size = state.size.saturating_sub(1);
+                }
+                continue;
+            }
+
+            let mut updated_body = body;
+            updated_body.rb = (stranded_count << 1) | (body.rb & SHEEP_ROLE_MASK);
+            if can_move {
+                self.set_checked_cell(body_x, body_y, EMPTY_CELL);
+                self.set_checked_cell(new_x, new_y, updated_body);
+            } else {
+                self.set_checked_cell(body_x, body_y, updated_body);
+            }
+        }
+    }
+
+    fn nearest_sheep_body(&self, id: u8, x: i32, y: i32) -> Option<(i32, i32)> {
+        let mut nearest = None;
+        for cell_x in 0..self.width {
+            for cell_y in 0..self.height {
+                let cell = self.cells[self.get_index(cell_x, cell_y)];
+                if cell.species != Species::Sheep
+                    || cell.ra != id
+                    || cell.rb & SHEEP_ROLE_MASK != SHEEP_BODY
+                {
+                    continue;
+                }
+
+                let distance = (cell_x - x).abs().max((cell_y - y).abs());
+                if nearest
+                    .map(|(_, _, nearest_distance)| distance < nearest_distance)
+                    .unwrap_or(true)
+                {
+                    nearest = Some((cell_x, cell_y, distance));
+                }
+            }
+        }
+        nearest.map(|(cell_x, cell_y, _)| (cell_x, cell_y))
+    }
+
     fn get_index(&self, x: i32, y: i32) -> usize {
         (x * self.height + y) as usize
     }
@@ -784,5 +1014,167 @@ mod tests {
                 dying_steps: None,
             })
         );
+    }
+
+    #[test]
+    fn sheep_scan_points_toward_the_nearest_plant() {
+        let mut universe = Universe::new(30, 30);
+        let farther_plant = universe.get_index(15, 10);
+        let nearer_plant = universe.get_index(8, 11);
+        universe.cells[farther_plant].species = Species::Plant;
+        universe.cells[nearer_plant].species = Species::Plant;
+
+        assert_eq!(universe.nearest_plant_direction(10, 10, 5), Some((-1, 1)));
+    }
+
+    #[test]
+    fn sheep_scan_stays_in_bounds_and_respects_radius() {
+        let mut universe = Universe::new(6, 6);
+        let outside_radius = universe.get_index(5, 5);
+        universe.cells[outside_radius].species = Species::Plant;
+
+        assert_eq!(universe.nearest_plant_direction(0, 0, 5), None);
+    }
+
+    #[test]
+    fn sheep_core_moves_on_cooldown_and_keeps_its_id() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let id = 1;
+        let plant_index = universe.get_index(15, 10);
+        universe.cells[plant_index].species = Species::Plant;
+
+        for _ in 0..7 {
+            universe.update_sheep_core(id, 10, 10);
+        }
+        assert_eq!(
+            (universe.sheep[&id].core_x, universe.sheep[&id].core_y),
+            (10, 10)
+        );
+
+        universe.update_sheep_core(id, 10, 10);
+
+        let state = &universe.sheep[&id];
+        assert_eq!((state.core_x, state.core_y), (11, 10));
+        assert!((8..=12).contains(&state.move_cooldown));
+        let old_core = universe.cells[universe.get_index(10, 10)];
+        let new_core = universe.cells[universe.get_index(11, 10)];
+        assert_eq!(
+            (old_core.species, old_core.ra, old_core.rb & 1),
+            (Species::Sheep, id, SHEEP_BODY)
+        );
+        assert_eq!(
+            (new_core.species, new_core.ra, new_core.rb & 1),
+            (Species::Sheep, id, SHEEP_CORE)
+        );
+    }
+
+    #[test]
+    fn sheep_core_rejects_hazardous_destinations() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let id = 1;
+        let destination = universe.get_index(11, 10);
+        let plant_index = universe.get_index(15, 10);
+        universe.cells[destination] = Cell {
+            species: Species::Water,
+            ra: 0,
+            rb: 0,
+            clock: 0,
+        };
+        universe.cells[plant_index].species = Species::Plant;
+
+        for _ in 0..8 {
+            universe.update_sheep_core(id, 10, 10);
+        }
+
+        let state = &universe.sheep[&id];
+        assert_eq!((state.core_x, state.core_y), (10, 10));
+        assert_eq!(state.direction, -1);
+        assert_eq!(universe.cells[destination].species, Species::Water);
+    }
+
+    #[test]
+    fn distant_sheep_body_moves_one_cell_toward_the_core() {
+        let mut universe = Universe::new(30, 30);
+        let core_index = universe.get_index(10, 10);
+        let body_index = universe.get_index(15, 10);
+        universe.cells[core_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_CORE,
+            clock: 0,
+        };
+        universe.cells[body_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_BODY,
+            clock: 0,
+        };
+        universe.rebuild_sheep_states();
+        universe.sheep.get_mut(&7).unwrap().move_cooldown = 100;
+
+        universe.update_sheep_core(7, 10, 10);
+
+        assert_eq!(universe.cells[body_index].species, Species::Empty);
+        let moved_body = universe.cells[universe.get_index(14, 10)];
+        assert_eq!((moved_body.species, moved_body.ra), (Species::Sheep, 7));
+        assert_eq!(moved_body.rb, SHEEP_BODY);
+    }
+
+    #[test]
+    fn stranded_sheep_body_is_removed_after_thirty_updates() {
+        let mut universe = Universe::new(30, 30);
+        let core_index = universe.get_index(10, 10);
+        let body_index = universe.get_index(15, 10);
+        let blocker_index = universe.get_index(14, 10);
+        universe.cells[core_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_CORE,
+            clock: 0,
+        };
+        universe.cells[body_index] = Cell {
+            species: Species::Sheep,
+            ra: 7,
+            rb: SHEEP_BODY,
+            clock: 0,
+        };
+        universe.cells[blocker_index].species = Species::Wall;
+        universe.rebuild_sheep_states();
+        universe.sheep.get_mut(&7).unwrap().move_cooldown = 100;
+
+        for _ in 0..29 {
+            universe.update_sheep_core(7, 10, 10);
+        }
+        assert_eq!(universe.cells[body_index].rb >> 1, 29);
+
+        universe.update_sheep_core(7, 10, 10);
+
+        assert_eq!(universe.cells[body_index].species, Species::Empty);
+        assert_eq!(universe.sheep[&7].size, 1);
+    }
+
+    #[test]
+    fn sheep_movement_preserves_id_and_pixel_limit() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let id = *universe.sheep.keys().next().unwrap();
+        let plant_index = universe.get_index(15, 10);
+        universe.cells[plant_index].species = Species::Plant;
+
+        for _ in 0..120 {
+            universe.tick();
+        }
+
+        let sheep_cells: Vec<Cell> = universe
+            .cells
+            .iter()
+            .copied()
+            .filter(|cell| cell.species == Species::Sheep && cell.ra == id)
+            .collect();
+        assert!(!sheep_cells.is_empty());
+        assert!(sheep_cells.len() <= 10);
+        assert!(sheep_cells.iter().all(|cell| cell.ra == id));
     }
 }

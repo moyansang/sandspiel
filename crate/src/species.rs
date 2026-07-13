@@ -3,6 +3,7 @@ use Cell;
 use SandApi;
 use Wind;
 use EMPTY_CELL;
+use SHEEP_CORE;
 
 // use std::cmp;
 use std::mem;
@@ -168,8 +169,12 @@ pub fn update_stone(cell: Cell, mut api: SandApi) {
     }
 }
 
-pub fn update_sheep(cell: Cell, mut api: SandApi) {
-    api.set(0, 0, cell);
+pub fn update_sheep(cell: Cell, api: SandApi) {
+    if cell.rb & 1 == SHEEP_CORE {
+        let x = api.x;
+        let y = api.y;
+        api.universe.update_sheep_core(cell.ra, x, y);
+    }
 }
 
 pub fn update_carcass(cell: Cell, api: SandApi) {
