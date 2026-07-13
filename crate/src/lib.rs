@@ -36,6 +36,7 @@ struct SheepState {
     direction: i8,
     move_cooldown: u8,
     eat_cooldown: u8,
+    energy_cooldown: u8,
     mature_steps: Option<u16>,
     starvation_steps: u16,
     submerged_steps: u16,
@@ -331,6 +332,7 @@ impl Universe {
                 direction: 1,
                 move_cooldown: 8,
                 eat_cooldown: 20,
+                energy_cooldown: 20,
                 mature_steps: None,
                 starvation_steps: 0,
                 submerged_steps: 0,
@@ -462,6 +464,7 @@ impl Universe {
                     direction: 1,
                     move_cooldown: 8,
                     eat_cooldown: 20,
+                    energy_cooldown: 20,
                     mature_steps: if size == 10 { Some(800) } else { None },
                     starvation_steps: 0,
                     submerged_steps: 0,
@@ -575,7 +578,12 @@ impl Universe {
     }
 
     fn advance_sheep_death(&mut self, id: u8) {
-        let mut body = None;
+        let (state_core_x, state_core_y) = self
+            .sheep
+            .get(&id)
+            .map(|state| (state.core_x, state.core_y))
+            .unwrap_or((0, 0));
+        let mut bodies = Vec::new();
         let mut core = None;
         for x in 0..self.width {
             for y in 0..self.height {
@@ -583,14 +591,17 @@ impl Universe {
                 if cell.species == Species::Sheep && cell.ra == id {
                     if cell.rb & SHEEP_ROLE_MASK == SHEEP_CORE {
                         core = Some((x, y));
-                    } else if body.is_none() {
-                        body = Some((x, y));
+                    } else {
+                        bodies.push((x, y));
                     }
                 }
             }
         }
 
-        if let Some((x, y)) = body.or(core) {
+        let nearest_body = bodies
+            .into_iter()
+            .min_by_key(|(x, y)| (x - state_core_x).abs().max((y - state_core_y).abs()));
+        if let Some((x, y)) = nearest_body.or(core) {
             let shade = 90 + self.rng.gen_range(0..40) as u8;
             self.set_checked_cell(
                 x,
@@ -666,7 +677,10 @@ impl Universe {
                 }
             }
 
-            if self.generation % 20 == 0 {
+            if state.energy_cooldown > 1 {
+                state.energy_cooldown -= 1;
+            } else {
+                state.energy_cooldown = 20;
                 state.energy = state.energy.saturating_sub(1);
             }
             if state.energy == 0 {
@@ -715,7 +729,6 @@ impl Universe {
                 );
                 let state = self.sheep.get_mut(&id).unwrap();
                 state.size += 1;
-                state.energy = state.energy.saturating_add(20).min(200);
                 if state.size == 10 && state.mature_steps.is_none() {
                     state.mature_steps = Some(800);
                 }
@@ -1139,6 +1152,7 @@ mod tests {
                 direction: 1,
                 move_cooldown: 8,
                 eat_cooldown: 20,
+                energy_cooldown: 20,
                 mature_steps: None,
                 starvation_steps: 0,
                 submerged_steps: 0,
@@ -1260,6 +1274,7 @@ mod tests {
                 direction: 1,
                 move_cooldown: 8,
                 eat_cooldown: 20,
+                energy_cooldown: 20,
                 mature_steps: Some(800),
                 starvation_steps: 0,
                 submerged_steps: 0,
@@ -1593,6 +1608,7 @@ mod tests {
     fn sheep_eats_one_adjacent_plant_and_grows() {
         let mut universe = Universe::new(30, 30);
         assert!(universe.spawn_sheep(10, 10));
+        universe.sheep.get_mut(&1).unwrap().energy = 80;
         let plant_index = universe.get_index(12, 10);
         universe.cells[plant_index].species = Species::Plant;
         universe.sheep.get_mut(&1).unwrap().eat_cooldown = 1;
@@ -1605,7 +1621,23 @@ mod tests {
             (Species::Sheep, 1, SHEEP_BODY)
         );
         assert_eq!(universe.sheep[&1].size, 6);
+        assert_eq!(universe.sheep[&1].energy, 80);
         assert!((20..=30).contains(&universe.sheep[&1].eat_cooldown));
+    }
+
+    #[test]
+    fn sheep_burns_one_energy_every_twenty_core_updates() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        universe.sheep.get_mut(&1).unwrap().move_cooldown = 255;
+
+        for _ in 0..19 {
+            universe.update_sheep_core(1, 10, 10);
+        }
+        assert_eq!(universe.sheep[&1].energy, 100);
+
+        universe.update_sheep_core(1, 10, 10);
+        assert_eq!(universe.sheep[&1].energy, 99);
     }
 
     #[test]
