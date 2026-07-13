@@ -523,6 +523,211 @@ impl Universe {
         None
     }
 
+    fn adjacent_plant_for_sheep(&self, id: u8) -> Option<(i32, i32)> {
+        for x in 0..self.width {
+            for y in 0..self.height {
+                let cell = self.get_cell(x, y);
+                if cell.species != Species::Sheep || cell.ra != id {
+                    continue;
+                }
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        if self
+                            .checked_cell(x + dx, y + dy)
+                            .map(|neighbor| neighbor.species == Species::Plant)
+                            .unwrap_or(false)
+                        {
+                            return Some((x + dx, y + dy));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn sheep_touches_hazard(&self, id: u8) -> bool {
+        for x in 0..self.width {
+            for y in 0..self.height {
+                let cell = self.get_cell(x, y);
+                if cell.species != Species::Sheep || cell.ra != id {
+                    continue;
+                }
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        let species = self
+                            .checked_cell(x + dx, y + dy)
+                            .map(|neighbor| neighbor.species);
+                        if matches!(
+                            species,
+                            Some(Species::Fire) | Some(Species::Lava) | Some(Species::Acid)
+                        ) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn advance_sheep_death(&mut self, id: u8) {
+        let mut body = None;
+        let mut core = None;
+        for x in 0..self.width {
+            for y in 0..self.height {
+                let cell = self.get_cell(x, y);
+                if cell.species == Species::Sheep && cell.ra == id {
+                    if cell.rb & SHEEP_ROLE_MASK == SHEEP_CORE {
+                        core = Some((x, y));
+                    } else if body.is_none() {
+                        body = Some((x, y));
+                    }
+                }
+            }
+        }
+
+        if let Some((x, y)) = body.or(core) {
+            let shade = 90 + self.rng.gen_range(0..40) as u8;
+            self.set_checked_cell(
+                x,
+                y,
+                Cell {
+                    species: Species::Carcass,
+                    ra: shade,
+                    rb: 0,
+                    clock: 0,
+                },
+            );
+            if let Some(state) = self.sheep.get_mut(&id) {
+                state.size = state.size.saturating_sub(1);
+                state.dying_steps = Some(state.dying_steps.unwrap_or(0).saturating_add(1));
+            }
+        }
+
+        if !self
+            .cells
+            .iter()
+            .any(|cell| cell.species == Species::Sheep && cell.ra == id)
+        {
+            self.sheep.remove(&id);
+        }
+    }
+
+    fn update_sheep_lifecycle(&mut self, id: u8) -> bool {
+        if self
+            .sheep
+            .get(&id)
+            .and_then(|state| state.dying_steps)
+            .is_some()
+        {
+            self.advance_sheep_death(id);
+            return true;
+        }
+
+        if self.sheep_touches_hazard(id) {
+            self.sheep.get_mut(&id).unwrap().dying_steps = Some(0);
+            self.advance_sheep_death(id);
+            return true;
+        }
+
+        let (core_x, core_y) = {
+            let state = &self.sheep[&id];
+            (state.core_x, state.core_y)
+        };
+        let water_sides = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .filter(|(dx, dy)| {
+                self.checked_cell(core_x + dx, core_y + dy)
+                    .map(|cell| cell.species == Species::Water)
+                    .unwrap_or(false)
+            })
+            .count();
+
+        let mut should_die = false;
+        {
+            let state = self.sheep.get_mut(&id).unwrap();
+            state.submerged_steps = if water_sides >= 3 {
+                state.submerged_steps.saturating_add(1)
+            } else {
+                0
+            };
+            if state.submerged_steps >= 180 {
+                should_die = true;
+            }
+
+            if let Some(steps) = state.mature_steps.as_mut() {
+                *steps = steps.saturating_sub(1);
+                if *steps == 0 {
+                    should_die = true;
+                }
+            }
+
+            if self.generation % 20 == 0 {
+                state.energy = state.energy.saturating_sub(1);
+            }
+            if state.energy == 0 {
+                state.starvation_steps = state.starvation_steps.saturating_add(1);
+                if state.starvation_steps >= 500 {
+                    should_die = true;
+                }
+            } else {
+                state.starvation_steps = 0;
+            }
+        }
+
+        if should_die {
+            self.sheep.get_mut(&id).unwrap().dying_steps = Some(0);
+            self.advance_sheep_death(id);
+            return true;
+        }
+
+        let eat_now = {
+            let state = self.sheep.get_mut(&id).unwrap();
+            if state.eat_cooldown > 1 {
+                state.eat_cooldown -= 1;
+                false
+            } else {
+                true
+            }
+        };
+        if !eat_now {
+            return false;
+        }
+
+        let next_eat = 20 + self.rng.gen_range(0..11) as u8;
+        self.sheep.get_mut(&id).unwrap().eat_cooldown = next_eat;
+        if let Some((plant_x, plant_y)) = self.adjacent_plant_for_sheep(id) {
+            let size = self.sheep[&id].size;
+            if size < 10 {
+                self.set_checked_cell(
+                    plant_x,
+                    plant_y,
+                    Cell {
+                        species: Species::Sheep,
+                        ra: id,
+                        rb: SHEEP_BODY,
+                        clock: 0,
+                    },
+                );
+                let state = self.sheep.get_mut(&id).unwrap();
+                state.size += 1;
+                state.energy = state.energy.saturating_add(20).min(200);
+                if state.size == 10 && state.mature_steps.is_none() {
+                    state.mature_steps = Some(800);
+                }
+            } else {
+                self.set_checked_cell(plant_x, plant_y, EMPTY_CELL);
+                let state = self.sheep.get_mut(&id).unwrap();
+                state.energy = state.energy.saturating_add(20).min(200);
+            }
+        }
+        false
+    }
+
     fn update_sheep_core(&mut self, id: u8, x: i32, y: i32) {
         let (core_x, core_y, move_cooldown, mut direction) = match self.sheep.get(&id) {
             Some(state) => (
@@ -534,6 +739,10 @@ impl Universe {
             None => return,
         };
         if (x, y) != (core_x, core_y) {
+            return;
+        }
+
+        if self.update_sheep_lifecycle(id) {
             return;
         }
 
@@ -1378,5 +1587,89 @@ mod tests {
             (universe.sheep[&1].core_x, universe.sheep[&1].core_y),
             (10, 10)
         );
+    }
+
+    #[test]
+    fn sheep_eats_one_adjacent_plant_and_grows() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let plant_index = universe.get_index(12, 10);
+        universe.cells[plant_index].species = Species::Plant;
+        universe.sheep.get_mut(&1).unwrap().eat_cooldown = 1;
+
+        universe.update_sheep_core(1, 10, 10);
+
+        let eaten = universe.cells[plant_index];
+        assert_eq!(
+            (eaten.species, eaten.ra, eaten.rb),
+            (Species::Sheep, 1, SHEEP_BODY)
+        );
+        assert_eq!(universe.sheep[&1].size, 6);
+        assert!((20..=30).contains(&universe.sheep[&1].eat_cooldown));
+    }
+
+    #[test]
+    fn sheep_starts_mature_lifespan_at_ten_pixels() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        universe.sheep.get_mut(&1).unwrap().size = 9;
+        universe.sheep.get_mut(&1).unwrap().eat_cooldown = 1;
+        let plant_index = universe.get_index(12, 10);
+        universe.cells[plant_index].species = Species::Plant;
+
+        universe.update_sheep_core(1, 10, 10);
+
+        assert_eq!(universe.sheep[&1].size, 10);
+        assert_eq!(universe.sheep[&1].mature_steps, Some(800));
+    }
+
+    #[test]
+    fn mature_sheep_dies_gradually_into_carcass() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        universe.sheep.get_mut(&1).unwrap().mature_steps = Some(1);
+
+        universe.update_sheep_core(1, 10, 10);
+        assert!(universe.sheep.contains_key(&1));
+        assert_eq!(
+            universe
+                .cells
+                .iter()
+                .filter(|cell| cell.species == Species::Carcass)
+                .count(),
+            1
+        );
+
+        for _ in 0..10 {
+            if !universe.sheep.contains_key(&1) {
+                break;
+            }
+            let (x, y) = {
+                let state = &universe.sheep[&1];
+                (state.core_x, state.core_y)
+            };
+            universe.update_sheep_core(1, x, y);
+        }
+        assert!(!universe.sheep.contains_key(&1));
+        assert!(!universe
+            .cells
+            .iter()
+            .any(|cell| cell.species == Species::Sheep && cell.ra == 1));
+    }
+
+    #[test]
+    fn fire_contact_starts_sheep_death() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let fire_index = universe.get_index(12, 10);
+        universe.cells[fire_index].species = Species::Fire;
+
+        universe.update_sheep_core(1, 10, 10);
+
+        assert!(universe
+            .cells
+            .iter()
+            .any(|cell| cell.species == Species::Carcass));
+        assert_eq!(universe.sheep[&1].dying_steps, Some(1));
     }
 }
