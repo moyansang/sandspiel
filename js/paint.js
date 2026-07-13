@@ -37,7 +37,7 @@ canvas.addEventListener("mousedown", (event) => {
   painting = true;
   clearInterval(repeat);
   repeat = window.setInterval(() => paint(event), 100);
-  paint(event);
+  paint(event, true);
   lastPaint = event;
 });
 
@@ -66,8 +66,9 @@ canvas.addEventListener("touchstart", (event) => {
     event.preventDefault();
   }
   painting = true;
-  lastPaint = event;
-  handleTouches(event);
+  const firstTouch = event.touches[0];
+  lastPaint = firstTouch;
+  paint(firstTouch, true);
 });
 
 canvas.addEventListener("touchend", (event) => {
@@ -127,7 +128,7 @@ const handleTouches = (event) => {
   }
 };
 
-const paint = (event) => {
+const paint = (event, spawnCreature = false) => {
   if (!painting) {
     return;
   }
@@ -143,6 +144,12 @@ const paint = (event) => {
 
   const x = Math.min(Math.floor(canvasLeft), width - 1);
   const y = Math.min(Math.floor(canvasTop), height - 1);
+  if (window.UI.state.selectedElement === window.species.Sheep) {
+    if (spawnCreature) {
+      universe.spawn_sheep(x, y);
+    }
+    return;
+  }
   if (window.UI.state.selectedElement < 0) return;
   universe.paint(
     x,

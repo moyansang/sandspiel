@@ -17,6 +17,13 @@ use wasm_bindgen::prelude::*;
 
 const SHEEP_BODY: u8 = 0;
 const SHEEP_CORE: u8 = 1;
+const NEWBORN_SHAPE: [(i32, i32, u8); 5] = [
+    (0, 0, SHEEP_CORE),
+    (-1, 0, SHEEP_BODY),
+    (1, 0, SHEEP_BODY),
+    (0, -1, SHEEP_BODY),
+    (1, -1, SHEEP_BODY),
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SheepState {
@@ -271,6 +278,67 @@ impl Universe {
     pub fn burns(&self) -> *const Wind {
         self.burns.as_ptr()
     }
+
+    pub fn spawn_sheep(&mut self, x: i32, y: i32) -> bool {
+        if x < 0 || x >= self.width || y < 0 || y >= self.height {
+            return false;
+        }
+
+        let core_index = self.get_index(x, y);
+        if self.cells[core_index].species != Species::Empty {
+            return false;
+        }
+
+        let sheep_id = (0..255)
+            .map(|offset| ((self.next_sheep_id as u16 - 1 + offset) % 255 + 1) as u8)
+            .find(|id| !self.sheep.contains_key(id));
+        let sheep_id = match sheep_id {
+            Some(id) => id,
+            None => return false,
+        };
+
+        let mut size = 0;
+        for &(dx, dy, part) in &NEWBORN_SHAPE {
+            let cell_x = x + dx;
+            let cell_y = y + dy;
+            if cell_x < 0 || cell_x >= self.width || cell_y < 0 || cell_y >= self.height {
+                continue;
+            }
+
+            let index = self.get_index(cell_x, cell_y);
+            if self.cells[index].species != Species::Empty {
+                continue;
+            }
+
+            self.cells[index] = Cell {
+                species: Species::Sheep,
+                ra: sheep_id,
+                rb: part,
+                clock: self.generation,
+            };
+            size += 1;
+        }
+
+        self.sheep.insert(
+            sheep_id,
+            SheepState {
+                core_x: x,
+                core_y: y,
+                energy: 100,
+                size,
+                direction: 1,
+                move_cooldown: 8,
+                eat_cooldown: 20,
+                mature_steps: None,
+                starvation_steps: 0,
+                submerged_steps: 0,
+                dying_steps: None,
+            },
+        );
+        self.next_sheep_id = if sheep_id == 255 { 1 } else { sheep_id + 1 };
+        true
+    }
+
     pub fn paint(&mut self, x: i32, y: i32, size: i32, species: Species) {
         let size = size;
         let radius: f64 = (size as f64) / 2.0;
@@ -517,6 +585,31 @@ impl Universe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_sheep_creates_one_core_and_up_to_four_body_pixels() {
+        let mut universe = Universe::new(20, 20);
+        assert!(universe.spawn_sheep(10, 10));
+        let cells: Vec<Cell> = universe
+            .cells
+            .iter()
+            .copied()
+            .filter(|cell| cell.species == Species::Sheep)
+            .collect();
+        assert_eq!(cells.len(), 5);
+        assert_eq!(cells.iter().filter(|cell| cell.rb == SHEEP_CORE).count(), 1);
+        assert!(cells.iter().all(|cell| cell.ra == cells[0].ra));
+    }
+
+    #[test]
+    fn spawn_sheep_fails_without_overwriting_occupied_cells() {
+        let mut universe = Universe::new(3, 3);
+        for cell in &mut universe.cells {
+            cell.species = Species::Wall;
+        }
+        assert!(!universe.spawn_sheep(1, 1));
+        assert!(universe.sheep.is_empty());
+    }
 
     #[test]
     fn rebuild_groups_sheep_pixels_by_id() {
