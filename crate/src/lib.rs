@@ -19,6 +19,8 @@ const SHEEP_BODY: u8 = 0;
 const SHEEP_CORE: u8 = 1;
 const SHEEP_ROLE_MASK: u8 = 1;
 const SHEEP_STRAY_LIMIT: u8 = 30;
+const SHEEP_MAX_SIZE: u8 = 14;
+const SHEEP_MATURE_LIFETIME: u16 = 1400;
 const NEWBORN_SHAPE: [(i32, i32, u8); 5] = [
     (0, 0, SHEEP_CORE),
     (-1, 0, SHEEP_BODY),
@@ -452,7 +454,7 @@ impl Universe {
                 .iter()
                 .find(|(_, _, _, is_core)| *is_core)
                 .unwrap_or(&cells[0]);
-            let size = cells.len().min(10) as u8;
+            let size = cells.len().min(SHEEP_MAX_SIZE as usize) as u8;
             self.cells[*core_index].rb = SHEEP_CORE;
             self.sheep.insert(
                 id,
@@ -465,7 +467,11 @@ impl Universe {
                     move_cooldown: 8,
                     eat_cooldown: 20,
                     energy_cooldown: 20,
-                    mature_steps: if size == 10 { Some(800) } else { None },
+                    mature_steps: if size == SHEEP_MAX_SIZE {
+                        Some(SHEEP_MATURE_LIFETIME)
+                    } else {
+                        None
+                    },
                     starvation_steps: 0,
                     submerged_steps: 0,
                     dying_steps: None,
@@ -716,7 +722,7 @@ impl Universe {
         self.sheep.get_mut(&id).unwrap().eat_cooldown = next_eat;
         if let Some((plant_x, plant_y)) = self.adjacent_plant_for_sheep(id) {
             let size = self.sheep[&id].size;
-            if size < 10 {
+            if size < SHEEP_MAX_SIZE {
                 self.set_checked_cell(
                     plant_x,
                     plant_y,
@@ -729,8 +735,8 @@ impl Universe {
                 );
                 let state = self.sheep.get_mut(&id).unwrap();
                 state.size += 1;
-                if state.size == 10 && state.mature_steps.is_none() {
-                    state.mature_steps = Some(800);
+                if state.size == SHEEP_MAX_SIZE && state.mature_steps.is_none() {
+                    state.mature_steps = Some(SHEEP_MATURE_LIFETIME);
                 }
             } else {
                 self.set_checked_cell(plant_x, plant_y, EMPTY_CELL);
@@ -1250,9 +1256,9 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_uses_default_state_and_caps_size_at_ten() {
+    fn rebuild_uses_default_state_and_caps_size_at_fourteen() {
         let mut universe = Universe::new(20, 20);
-        for x in 0..11 {
+        for x in 0..15 {
             let index = universe.get_index(x, 0);
             universe.cells[index] = Cell {
                 species: Species::Sheep,
@@ -1270,12 +1276,12 @@ mod tests {
                 core_x: 0,
                 core_y: 0,
                 energy: 100,
-                size: 10,
+                size: 14,
                 direction: 1,
                 move_cooldown: 8,
                 eat_cooldown: 20,
                 energy_cooldown: 20,
-                mature_steps: Some(800),
+                mature_steps: Some(1400),
                 starvation_steps: 0,
                 submerged_steps: 0,
                 dying_steps: None,
@@ -1511,7 +1517,7 @@ mod tests {
             .filter(|cell| cell.species == Species::Sheep && cell.ra == id)
             .collect();
         assert!(!sheep_cells.is_empty());
-        assert!(sheep_cells.len() <= 10);
+        assert!(sheep_cells.len() <= SHEEP_MAX_SIZE as usize);
         assert!(sheep_cells.iter().all(|cell| cell.ra == id));
     }
 
@@ -1641,18 +1647,18 @@ mod tests {
     }
 
     #[test]
-    fn sheep_starts_mature_lifespan_at_ten_pixels() {
+    fn sheep_starts_mature_lifespan_at_fourteen_pixels() {
         let mut universe = Universe::new(30, 30);
         assert!(universe.spawn_sheep(10, 10));
-        universe.sheep.get_mut(&1).unwrap().size = 9;
+        universe.sheep.get_mut(&1).unwrap().size = 13;
         universe.sheep.get_mut(&1).unwrap().eat_cooldown = 1;
         let plant_index = universe.get_index(12, 10);
         universe.cells[plant_index].species = Species::Plant;
 
         universe.update_sheep_core(1, 10, 10);
 
-        assert_eq!(universe.sheep[&1].size, 10);
-        assert_eq!(universe.sheep[&1].mature_steps, Some(800));
+        assert_eq!(universe.sheep[&1].size, 14);
+        assert_eq!(universe.sheep[&1].mature_steps, Some(1400));
     }
 
     #[test]
