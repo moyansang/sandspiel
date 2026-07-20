@@ -972,6 +972,15 @@ impl Universe {
     }
 
     fn update_sheep_bodies(&mut self, id: u8, core_x: i32, core_y: i32) {
+        let body_positions_before: Vec<_> = (0..self.width)
+            .flat_map(|x| (0..self.height).map(move |y| (x, y)))
+            .filter(|(body_x, body_y)| {
+                let cell = self.cells[self.get_index(*body_x, *body_y)];
+                cell.species == Species::Sheep
+                    && cell.ra == id
+                    && cell.rb & SHEEP_ROLE_MASK == SHEEP_BODY
+            })
+            .collect();
         let mut moved_body = self.round_sheep_body_step(id, core_x, core_y);
         let mut body_positions = Vec::new();
         for body_x in 0..self.width {
@@ -985,6 +994,15 @@ impl Universe {
                 }
             }
         }
+        let mut moved_body_destination = moved_body
+            .then(|| {
+                body_positions.iter().copied().find(|(body_x, body_y)| {
+                    let body = self.cells[self.get_index(*body_x, *body_y)];
+                    body.clock.wrapping_sub(self.generation) == 1
+                        && !body_positions_before.contains(&(*body_x, *body_y))
+                })
+            })
+            .flatten();
 
         for (body_x, body_y) in body_positions {
             let body_index = self.get_index(body_x, body_y);
@@ -992,7 +1010,8 @@ impl Universe {
             if body.species != Species::Sheep
                 || body.ra != id
                 || body.rb & SHEEP_ROLE_MASK != SHEEP_BODY
-                || (moved_body && body.clock.wrapping_sub(self.generation) == 1)
+                || (moved_body_destination == Some((body_x, body_y))
+                    && body.clock.wrapping_sub(self.generation) == 1)
             {
                 continue;
             }
@@ -1036,6 +1055,7 @@ impl Universe {
                 self.set_checked_cell(body_x, body_y, EMPTY_CELL);
                 self.set_checked_cell(new_x, new_y, updated_body);
                 moved_body = true;
+                moved_body_destination = Some((new_x, new_y));
             } else {
                 self.set_checked_cell(body_x, body_y, updated_body);
             }
@@ -1610,6 +1630,38 @@ mod tests {
         assert!(body_positions
             .iter()
             .all(|position| preferred_slots.contains(position)));
+    }
+
+    #[test]
+    fn round_body_move_does_not_skip_other_stranded_body_cleanup() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let round_body_index = universe.get_index(10, 16);
+        let blocked_body_index = universe.get_index(15, 10);
+        let blocked_destination_index = universe.get_index(14, 10);
+        universe.cells[round_body_index] = Cell {
+            species: Species::Sheep,
+            ra: 1,
+            rb: SHEEP_BODY,
+            clock: 0,
+        };
+        universe.cells[blocked_body_index] = Cell {
+            species: Species::Sheep,
+            ra: 1,
+            rb: SHEEP_BODY,
+            clock: universe.generation.wrapping_add(1),
+        };
+        universe.cells[blocked_destination_index].species = Species::Stone;
+        universe.sheep.get_mut(&1).unwrap().size += 2;
+
+        universe.update_sheep_bodies(1, 10, 10);
+
+        assert_eq!(universe.cells[round_body_index].species, Species::Empty);
+        assert_eq!(
+            universe.cells[universe.get_index(10, 15)].species,
+            Species::Sheep
+        );
+        assert_eq!(universe.cells[blocked_body_index].rb >> 1, 1);
     }
 
     #[test]
