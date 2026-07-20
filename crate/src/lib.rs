@@ -21,6 +21,21 @@ const SHEEP_ROLE_MASK: u8 = 1;
 const SHEEP_STRAY_LIMIT: u8 = 30;
 const SHEEP_MAX_SIZE: u8 = 14;
 const SHEEP_MATURE_LIFETIME: u16 = 1400;
+const SHEEP_ROUND_BODY_OFFSETS: [(i32, i32); 13] = [
+    (-1, -1),
+    (0, -1),
+    (1, -1),
+    (-1, 0),
+    (1, 0),
+    (-1, 1),
+    (0, 1),
+    (1, 1),
+    (-2, 0),
+    (2, 0),
+    (0, -2),
+    (0, 2),
+    (2, 1),
+];
 const NEWBORN_SHAPE: [(i32, i32, u8); 5] = [
     (0, 0, SHEEP_CORE),
     (-1, 0, SHEEP_BODY),
@@ -495,6 +510,27 @@ impl Universe {
         self.checked_index(x, y).map(|index| self.cells[index])
     }
 
+    fn sheep_preferred_slots(&self, id: u8) -> Vec<(i32, i32)> {
+        let state = match self.sheep.get(&id) {
+            Some(state) => state,
+            None => return Vec::new(),
+        };
+        let mirror = if state.direction < 0 { -1 } else { 1 };
+        SHEEP_ROUND_BODY_OFFSETS
+            .iter()
+            .map(|(dx, dy)| (state.core_x + dx * mirror, state.core_y + dy))
+            .filter(|(x, y)| self.checked_index(*x, *y).is_some())
+            .collect()
+    }
+
+    fn free_sheep_growth_slot(&self, id: u8) -> Option<(i32, i32)> {
+        self.sheep_preferred_slots(id).into_iter().find(|(x, y)| {
+            self.checked_cell(*x, *y)
+                .map(|cell| cell.species == Species::Empty)
+                .unwrap_or(false)
+        })
+    }
+
     fn set_checked_cell(&mut self, x: i32, y: i32, mut cell: Cell) -> bool {
         let index = match self.checked_index(x, y) {
             Some(index) => index,
@@ -723,20 +759,23 @@ impl Universe {
         if let Some((plant_x, plant_y)) = self.adjacent_plant_for_sheep(id) {
             let size = self.sheep[&id].size;
             if size < SHEEP_MAX_SIZE {
-                self.set_checked_cell(
-                    plant_x,
-                    plant_y,
-                    Cell {
-                        species: Species::Sheep,
-                        ra: id,
-                        rb: SHEEP_BODY,
-                        clock: 0,
-                    },
-                );
-                let state = self.sheep.get_mut(&id).unwrap();
-                state.size += 1;
-                if state.size == SHEEP_MAX_SIZE && state.mature_steps.is_none() {
-                    state.mature_steps = Some(SHEEP_MATURE_LIFETIME);
+                if let Some((slot_x, slot_y)) = self.free_sheep_growth_slot(id) {
+                    self.set_checked_cell(plant_x, plant_y, EMPTY_CELL);
+                    self.set_checked_cell(
+                        slot_x,
+                        slot_y,
+                        Cell {
+                            species: Species::Sheep,
+                            ra: id,
+                            rb: SHEEP_BODY,
+                            clock: 0,
+                        },
+                    );
+                    let state = self.sheep.get_mut(&id).unwrap();
+                    state.size += 1;
+                    if state.size == SHEEP_MAX_SIZE && state.mature_steps.is_none() {
+                        state.mature_steps = Some(SHEEP_MATURE_LIFETIME);
+                    }
                 }
             } else {
                 self.set_checked_cell(plant_x, plant_y, EMPTY_CELL);
@@ -1618,17 +1657,66 @@ mod tests {
         let plant_index = universe.get_index(12, 10);
         universe.cells[plant_index].species = Species::Plant;
         universe.sheep.get_mut(&1).unwrap().eat_cooldown = 1;
+        let initially_empty_slots: Vec<_> = universe
+            .sheep_preferred_slots(1)
+            .into_iter()
+            .filter(|(x, y)| universe.cells[universe.get_index(*x, *y)].species == Species::Empty)
+            .collect();
 
         universe.update_sheep_core(1, 10, 10);
 
-        let eaten = universe.cells[plant_index];
-        assert_eq!(
-            (eaten.species, eaten.ra, eaten.rb),
-            (Species::Sheep, 1, SHEEP_BODY)
-        );
+        assert_eq!(universe.cells[plant_index].species, Species::Empty);
+        let body_count = initially_empty_slots
+            .into_iter()
+            .filter(|(x, y)| {
+                let cell = universe.cells[universe.get_index(*x, *y)];
+                cell.species == Species::Sheep && cell.ra == 1 && cell.rb == SHEEP_BODY
+            })
+            .count();
+        assert_eq!(body_count, 1);
         assert_eq!(universe.sheep[&1].size, 6);
         assert_eq!(universe.sheep[&1].energy, 80);
         assert!((20..=30).contains(&universe.sheep[&1].eat_cooldown));
+    }
+
+    #[test]
+    fn sheep_round_slots_stay_within_two_cells_and_mirror_direction() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+
+        universe.sheep.get_mut(&1).unwrap().direction = 1;
+        let right_slots = universe.sheep_preferred_slots(1);
+        universe.sheep.get_mut(&1).unwrap().direction = -1;
+        let left_slots = universe.sheep_preferred_slots(1);
+
+        assert_eq!(right_slots.len(), 13);
+        assert!(right_slots
+            .iter()
+            .all(|(x, y)| { (x - 10).abs() <= 2 && (y - 10).abs() <= 2 && (*x, *y) != (10, 10) }));
+        assert!(right_slots.contains(&(12, 11)));
+        assert!(left_slots.contains(&(8, 11)));
+    }
+
+    #[test]
+    fn blocked_round_slots_keep_plant_and_delay_growth() {
+        let mut universe = Universe::new(30, 30);
+        assert!(universe.spawn_sheep(10, 10));
+        let slots = universe.sheep_preferred_slots(1);
+        for (x, y) in slots {
+            let index = universe.get_index(x, y);
+            if universe.cells[index].species == Species::Empty {
+                universe.cells[index].species = Species::Stone;
+            }
+        }
+        let plant_index = universe.get_index(10, 12);
+        universe.cells[plant_index].species = Species::Plant;
+        universe.sheep.get_mut(&1).unwrap().eat_cooldown = 1;
+        let original_size = universe.sheep[&1].size;
+
+        universe.update_sheep_core(1, 10, 10);
+
+        assert_eq!(universe.cells[plant_index].species, Species::Plant);
+        assert_eq!(universe.sheep[&1].size, original_size);
     }
 
     #[test]
